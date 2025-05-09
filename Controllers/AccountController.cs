@@ -48,8 +48,8 @@ namespace UserAccountAPI.Controllers
         [HttpGet("profile")]
         public async Task<IActionResult> GetUserProfile()
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userId))
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
             {
                 return Unauthorized();
             }
@@ -61,13 +61,14 @@ namespace UserAccountAPI.Controllers
             }
 
             return Ok(user);
+
         }
 
         [HttpPut("profile")]
         public async Task<IActionResult> UpdateUserProfile([FromBody] UpdateUserDTO model)
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userId))
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
             {
                 return Unauthorized();
             }
@@ -79,30 +80,28 @@ namespace UserAccountAPI.Controllers
                 return NotFound(new { message = "User not found." });
             }
 
-            // Check if user is a doctor and update corresponding record
+            // Update doctor name if user is a doctor
             if (_doctorRepository != null && User.IsInRole("Doctor"))
             {
-                var doctors = await _doctorRepository.GetAllDoctors();
-                var doctor = doctors.FirstOrDefault(d => d.UserId == userId);
+                var doctor = (await _doctorRepository.GetAllDoctors())
+                                .FirstOrDefault(d => d.UserId == userId);
 
                 if (doctor != null)
                 {
-                    // Update relevant doctor fields that should be synchronized with user profile
-                    doctor.Name = $"{model.FirstName} {model.LastName}";
+                    doctor.Name = $"{updatedUser.FirstName} {updatedUser.LastName}";
                     await _doctorRepository.UpdateDoctor(doctor);
                 }
             }
 
-            // Check if user is a patient and update corresponding record
+            // Update patient name if user is a patient
             if (_patientRepository != null && User.IsInRole("Patient"))
             {
-                var patients = await _patientRepository.GetAllPatients();
-                var patient = patients.FirstOrDefault(p => p.UserId == userId);
+                var patient = (await _patientRepository.GetAllPatients())
+                                .FirstOrDefault(p => p.UserId == userId);
 
                 if (patient != null)
                 {
-                    // Update relevant patient fields that should be synchronized with user profile
-                    patient.FullName = $"{model.FirstName} {model.LastName}";
+                    patient.FullName = $"{updatedUser.FirstName} {updatedUser.LastName}";
                     await _patientRepository.UpdatePatient(patient);
                 }
             }
@@ -113,8 +112,8 @@ namespace UserAccountAPI.Controllers
         [HttpDelete("profile")]
         public async Task<IActionResult> DeleteUserProfile()
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userId))
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
             {
                 return Unauthorized();
             }
@@ -131,8 +130,8 @@ namespace UserAccountAPI.Controllers
         [HttpGet("email-verified")]
         public async Task<IActionResult> IsEmailVerified()
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userId))
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
             {
                 return Unauthorized();
             }
@@ -142,12 +141,13 @@ namespace UserAccountAPI.Controllers
         }
 
         [HttpPost("resend-confirmation")]
+        [Authorize]
         public async Task<IActionResult> ResendConfirmationEmail()
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userId))
+            var userIdString = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
             {
-                return Unauthorized();
+                return Unauthorized(new { message = "Invalid or missing user ID." });
             }
 
             var user = await _authService.GetUserByIdAsync(userId);
@@ -161,20 +161,9 @@ namespace UserAccountAPI.Controllers
                 return BadRequest(new { message = "Email already confirmed." });
             }
 
-            var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+            await _authService.GenerateAndSendEmailConfirmationCodeAsync(user);
 
-            var encodedToken = HttpUtility.UrlEncode(token);
-            var clientUrl = _configuration["ClientUrl"];
-            var confirmationLink = $"{clientUrl}/confirm-email?userId={user.Id}&token={encodedToken}";
-
-            await _emailService.SendEmailConfirmationAsync(
-                user.Email,
-                confirmationLink,
-                user.Id,
-                token
-            );
-
-            return Ok(new { message = "Confirmation email sent successfully." });
+            return Ok(new { message = "Confirmation code sent successfully to your email." });
         }
     }
 }

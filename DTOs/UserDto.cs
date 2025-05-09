@@ -18,14 +18,12 @@ namespace UserAccountAPI.DTOs
         public string AccessToken { get; set; }
         public string RefreshToken { get; set; }
         public DateTime ExpiresAt { get; set; }
+        public PatientDTO Patient { get; set; }
     }
 
     public class UpdateUserDTO
     {
-        public string FirstName { get; set; }
-        public string LastName { get; set; }
         public string PhoneNumber { get; set; }
-        public string NationalId { get; set; }
-        public DateTime? DateOfBirth { get; set; }
+        public string Email { get; set; }
     }
 }

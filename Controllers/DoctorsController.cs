@@ -9,6 +9,11 @@ using AutoMapper;
 using UserAccountAPI.DTOs;
 using System.Linq;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Identity;
+using UserAccountAPI.Common;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using UserAccountAPI.Data;
 
 namespace MedicalAPI_1.Controllers
 {
@@ -18,11 +23,25 @@ namespace MedicalAPI_1.Controllers
     {
         private readonly IDoctorRepository _doctorRepository;
         private readonly IMapper _mapper;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly ApplicationDbContext _context;
+        private readonly RoleManager<ApplicationRole> _roleManager;
+        private readonly ILogger<DoctorsController> _logger;
 
-        public DoctorsController(IDoctorRepository doctorRepository, IMapper mapper)
+        public DoctorsController(
+            IDoctorRepository doctorRepository,
+            IMapper mapper,
+            UserManager<ApplicationUser> userManager,
+            ApplicationDbContext context,
+            RoleManager<ApplicationRole> roleManager,
+            ILogger<DoctorsController> logger)
         {
             _doctorRepository = doctorRepository;
+            _context = context;
             _mapper = mapper;
+            _userManager = userManager;
+            _roleManager = roleManager;
+            _logger = logger;
         }
 
         // GET: api/Doctors
@@ -38,12 +57,10 @@ namespace MedicalAPI_1.Controllers
         public async Task<ActionResult<DoctorDto>> GetDoctor(int id)
         {
             var doctor = await _doctorRepository.GetDoctorById(id);
-
             if (doctor == null)
             {
                 return NotFound();
             }
-
             return _mapper.Map<DoctorDto>(doctor);
         }
 
@@ -76,9 +93,7 @@ namespace MedicalAPI_1.Controllers
         [Authorize(Roles = "Admin,Doctor")]
         public async Task<ActionResult<DoctorDto>> PutDoctor(int id, DoctorUpdateDto doctorDto)
         {
-            // Get the existing doctor first
             var existingDoctor = await _doctorRepository.GetDoctorById(id);
-
             if (existingDoctor == null)
             {
                 return NotFound();
@@ -87,12 +102,23 @@ namespace MedicalAPI_1.Controllers
             // Check if the user is a doctor updating their own profile
             if (User.IsInRole("Doctor") && !User.IsInRole("Admin"))
             {
-                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+                {
+                    return Unauthorized();
+                }
 
                 if (existingDoctor.UserId != userId)
                 {
                     return Forbid();
                 }
+            }
+
+            // Validate DepartmentId
+            var departmentExists = await _context.Departments.AnyAsync(d => d.Id == doctorDto.DepartmentId);
+            if (!departmentExists)
+            {
+                return BadRequest("The specified DepartmentId does not exist.");
             }
 
             // Update the properties from the DTO
@@ -102,9 +128,27 @@ namespace MedicalAPI_1.Controllers
             existingDoctor.IsAvailableToday = doctorDto.IsAvailableToday;
             existingDoctor.DepartmentId = doctorDto.DepartmentId;
 
-            var updatedDoctor = await _doctorRepository.UpdateDoctor(existingDoctor);
-
-            return _mapper.Map<DoctorDto>(updatedDoctor);
+            try
+            {
+                _logger.LogInformation("جاري تحديث الدكتور {Id}، DepartmentId: {DepartmentId}", id, doctorDto.DepartmentId);
+                await _doctorRepository.UpdateDoctor(existingDoctor);
+                var updatedDoctorDto = new DoctorDto
+                {
+                    Id = existingDoctor.Id,
+                    Name = existingDoctor.Name,
+                    Specialty = existingDoctor.Specialty,
+                    PhoneNumber = existingDoctor.PhoneNumber,
+                    IsAvailableToday = existingDoctor.IsAvailableToday,
+                    DepartmentId = existingDoctor.DepartmentId,
+                    UserId = existingDoctor.UserId
+                };
+                return Ok(updatedDoctorDto);
+            }
+            catch (DbUpdateException ex)
+            {
+                _logger.LogError(ex, "خطأ أثناء تحديث الدكتور {Id}. الإيرور الداخلي: {InnerException}", id, ex.InnerException?.Message);
+                return StatusCode(500, "حدث خطأ أثناء تحديث بيانات الدكتور.");
+            }
         }
 
         // POST: api/Doctors
@@ -113,7 +157,7 @@ namespace MedicalAPI_1.Controllers
         public async Task<ActionResult<DoctorDto>> PostDoctor(DoctorCreateDto doctorDto)
         {
             // Check if a doctor with this UserId already exists
-            if (!string.IsNullOrEmpty(doctorDto.UserId))
+            if (doctorDto.UserId.HasValue)
             {
                 var existingDoctor = await _doctorRepository.GetDoctorByUserId(doctorDto.UserId);
                 if (existingDoctor != null)
@@ -148,12 +192,10 @@ namespace MedicalAPI_1.Controllers
         public async Task<IActionResult> DeleteDoctor(int id)
         {
             var result = await _doctorRepository.DeleteDoctor(id);
-
             if (!result)
             {
                 return NotFound();
             }
-
             return NoContent();
         }
 
@@ -162,16 +204,14 @@ namespace MedicalAPI_1.Controllers
         [Authorize(Roles = "Admin")]
         public async Task<ActionResult<DoctorDto>> AssignDepartment(int id, int departmentId)
         {
-            // No need for a DTO here since we're just passing a simple departmentId
             var doctor = await _doctorRepository.AssignDepartment(id, departmentId);
-
             if (doctor == null)
             {
                 return NotFound();
             }
-
             return _mapper.Map<DoctorDto>(doctor);
         }
+
         // PUT: api/Doctors/5/working-hours
         [HttpPut("{id}/working-hours")]
         [Authorize(Roles = "Admin,Doctor")]
@@ -180,14 +220,16 @@ namespace MedicalAPI_1.Controllers
             // Check if the user is a doctor updating their own working hours
             if (User.IsInRole("Doctor") && !User.IsInRole("Admin"))
             {
-                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+                {
+                    return Unauthorized();
+                }
                 var existingDoctor = await _doctorRepository.GetDoctorById(id);
-
                 if (existingDoctor == null)
                 {
                     return NotFound();
                 }
-
                 if (existingDoctor.UserId != userId)
                 {
                     return Forbid();
@@ -204,12 +246,10 @@ namespace MedicalAPI_1.Controllers
             }).ToList();
 
             var doctor = await _doctorRepository.UpdateWorkingHours(id, workingHoursList);
-
             if (doctor == null)
             {
                 return NotFound();
             }
-
             return _mapper.Map<DoctorDto>(doctor);
         }
 
@@ -226,16 +266,50 @@ namespace MedicalAPI_1.Controllers
         [Authorize(Roles = "Doctor")]
         public async Task<ActionResult<DoctorDto>> GetDoctorProfile()
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+            {
+                return Unauthorized();
+            }
             var doctor = await _doctorRepository.GetDoctorByUserId(userId);
-
             if (doctor == null)
             {
                 return NotFound();
             }
-
             return _mapper.Map<DoctorDto>(doctor);
+        }
+
+        // POST: api/Doctors/5/link-user/1
+        [HttpPost("{doctorId}/link-user/{userId}")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<DoctorDto>> LinkDoctorToUser(int doctorId, int userId)
+        {
+            // Check if user exists and has Doctor role
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null)
+            {
+                return NotFound("User not found");
+            }
+
+            // Check if user already has Doctor role
+            var userRoles = await _userManager.GetRolesAsync(user);
+            if (!userRoles.Contains(UserRoles.Doctor))
+            {
+                // Add Doctor role if needed
+                if (!await _roleManager.RoleExistsAsync(UserRoles.Doctor))
+                {
+                    await _roleManager.CreateAsync(new ApplicationRole { Name = UserRoles.Doctor });
+                }
+                await _userManager.AddToRoleAsync(user, UserRoles.Doctor);
+            }
+
+            // Link the doctor to the user
+            var updatedDoctor = await _doctorRepository.LinkDoctorToUser(doctorId, userId);
+            if (updatedDoctor == null)
+            {
+                return BadRequest("Failed to link doctor and user. Either doctor or user doesn't exist, or doctor already linked to another user.");
+            }
+            return _mapper.Map<DoctorDto>(updatedDoctor);
         }
     }
 }

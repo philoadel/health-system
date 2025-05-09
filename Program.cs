@@ -16,6 +16,17 @@ using UserAccountAPI.Services;
 using UserAccountAPI.Services.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowSpecificOrigin", policy =>
+    {
+        // ????? ?????? ???? ???? ?????? ?? ???????
+        policy.WithOrigins("http://localhost:7248") // ?? ?????? ??? URL ??? ??????
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
 
 builder.Services.AddControllers();
 
@@ -41,7 +52,6 @@ builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options =>
 })
 .AddEntityFrameworkStores<ApplicationDbContext>()
 .AddDefaultTokenProviders();
-
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -61,8 +71,31 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["JWT:Secret"])),
         ClockSkew = TimeSpan.Zero
     };
+
+    // Add token validation events to check blacklist
+    options.Events = new JwtBearerEvents
+    {
+        OnTokenValidated = async context =>
+        {
+            var tokenBlacklistService = context.HttpContext.RequestServices
+                .GetRequiredService<ITokenBlacklistService>();
+
+            // Extract raw token from the request
+            string rawToken = context.Request.Headers["Authorization"]
+                .ToString().Replace("Bearer ", "");
+
+            // Check if token is blacklisted
+            if (await tokenBlacklistService.IsTokenBlacklistedAsync(rawToken))
+            {
+                // Reject the authentication if token is blacklisted
+                context.Fail("Token has been revoked");
+            }
+        }
+    };
 });
 
+// Add distributed cache (memory cache for development, Redis for production)
+builder.Services.AddDistributedMemoryCache();
 
 // Configure Authorization Policies
 builder.Services.AddAuthorization(options =>
@@ -81,6 +114,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAppointmentService, AppointmentService>();
+builder.Services.AddSingleton<ITokenBlacklistService, TokenBlacklistService>();
 
 
 builder.Services.AddScoped<IUserRepository, UserRepository>();
@@ -106,23 +140,27 @@ builder.Services.AddSwaggerGen(c =>
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.ApiKey,
-        Scheme = "Bearer"
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
         {
-            new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
+                new OpenApiSecurityScheme
                 {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            Array.Empty<string>()
-        }
-    });
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = "Bearer"
+                    }
+                },
+                Array.Empty<string>()
+            }
+        });
+
+
 });
 
 
@@ -186,7 +224,9 @@ async Task SeedFirstAdmin(IServiceProvider serviceProvider)
                 Email = adminEmail,
                 FirstName = "Admin",
                 LastName = "User",
-                EmailConfirmed = true // First admin has confirmed email for immediate access
+                EmailConfirmed = true, // First admin has confirmed email for immediate access
+                Gender = "Male",
+                NationalId = "00000000000000"
             };
 
             var result = await userManager.CreateAsync(adminUser, adminPassword);

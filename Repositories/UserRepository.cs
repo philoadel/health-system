@@ -29,30 +29,33 @@ namespace UserAccountAPI.Repositories
             _mapper = mapper;
         }
 
-        public async Task<UserDTO> GetUserByIdAsync(string userId)
+        public async Task<UserDTO> GetUserByIdAsync(int userId)
         {
-            var user = await _userManager.FindByIdAsync(userId);
+            var user = await _userManager.FindByIdAsync(userId.ToString());
             return _mapper.Map<UserDTO>(user);
         }
 
-        public async Task<UserDTO> UpdateUserAsync(string userId, UpdateUserDTO model)
+        public async Task<UserDTO> UpdateUserAsync(int userId, UpdateUserDTO model)
         {
-            var user = await _userManager.FindByIdAsync(userId);
-            if (user == null)
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null) return null;
+
+            user.PhoneNumber = model.PhoneNumber;
+            user.Email = model.Email;
+            user.UserName = model.Email; // Optional: لو حابب تخلي الـ UserName زي الإيميل
+
+            await _context.SaveChangesAsync();
+            return new UserDTO
             {
-                return null;
-            }
-
-            user.FirstName = model.FirstName ?? user.FirstName;
-            user.LastName = model.LastName ?? user.LastName;
-
-            await _userManager.UpdateAsync(user);
-            return _mapper.Map<UserDTO>(user);
+                Id = user.Id.ToString(),
+                Email = user.Email,
+                PhoneNumber = user.PhoneNumber
+            };
         }
 
-        public async Task<bool> DeleteUserAsync(string userId)
+        public async Task<bool> DeleteUserAsync(int userId)
         {
-            var user = await _userManager.FindByIdAsync(userId);
+            var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null)
             {
                 return false;

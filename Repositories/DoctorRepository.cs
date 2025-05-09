@@ -1,7 +1,6 @@
 ﻿// DoctorRepository.cs
 using UserAccountAPI.Models;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.SqlServer.Server;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -21,17 +20,28 @@ namespace UserAccountAPI.Repositories
 
         public async Task<IEnumerable<Doctor>> GetAllDoctors()
         {
-            return await _context.Doctors.ToListAsync();
+            return await _context.Doctors
+                .Include(d => d.Department)
+                .Include(d => d.WorkingHours)
+                .ToListAsync();
         }
 
         public async Task<Doctor> GetDoctorById(int id)
         {
-            return await _context.Doctors.FindAsync(id);
+            return await _context.Doctors
+                .Include(d => d.Department)
+                .Include(d => d.WorkingHours)
+                .FirstOrDefaultAsync(d => d.Id == id);
         }
 
-        public async Task<Doctor> GetDoctorByUserId(string userId)
+        public async Task<Doctor> GetDoctorByUserId(int? userId)
         {
+            if (!userId.HasValue)
+                return null;
+
             return await _context.Doctors
+                .Include(d => d.Department)
+                .Include(d => d.WorkingHours)
                 .FirstOrDefaultAsync(d => d.UserId == userId);
         }
 
@@ -44,7 +54,37 @@ namespace UserAccountAPI.Repositories
 
         public async Task<Doctor> UpdateDoctor(Doctor doctor)
         {
-            _context.Entry(doctor).State = EntityState.Modified;
+            var entry = _context.Entry(doctor);
+            entry.Property(d => d.Name).IsModified = true;
+            entry.Property(d => d.Specialty).IsModified = true;
+            entry.Property(d => d.PhoneNumber).IsModified = true;
+            entry.Property(d => d.IsAvailableToday).IsModified = true;
+            entry.Property(d => d.DepartmentId).IsModified = true;
+            // متعلمش UserId كـ modified عشان ماتعدلش قيمته
+            await _context.SaveChangesAsync();
+            return doctor;
+        }
+
+        // New method to link a doctor created via SQL to a user account
+        public async Task<Doctor> LinkDoctorToUser(int doctorId, int userId)
+        {
+            var doctor = await _context.Doctors.FindAsync(doctorId);
+            if (doctor == null) return null;
+
+            // Check if user exists
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null) return null;
+
+            // Check if doctor is already linked to this or another user
+            if (doctor.UserId.HasValue)
+            {
+                if (doctor.UserId == userId)
+                    return doctor; // Already linked to this user
+                else
+                    return null; // Linked to different user, cannot change
+            }
+
+            doctor.UserId = userId;
             await _context.SaveChangesAsync();
             return doctor;
         }
@@ -62,6 +102,8 @@ namespace UserAccountAPI.Repositories
         public async Task<IEnumerable<Doctor>> GetDoctorsByDepartment(int departmentId)
         {
             return await _context.Doctors
+                .Include(d => d.Department)
+                .Include(d => d.WorkingHours)
                 .Where(d => d.DepartmentId == departmentId)
                 .ToListAsync();
         }
@@ -69,6 +111,8 @@ namespace UserAccountAPI.Repositories
         public async Task<IEnumerable<Doctor>> GetDoctorsBySpecialty(string specialty)
         {
             return await _context.Doctors
+                .Include(d => d.Department)
+                .Include(d => d.WorkingHours)
                 .Where(d => d.Specialty.ToLower() == specialty.ToLower())
                 .ToListAsync();
         }
@@ -76,6 +120,8 @@ namespace UserAccountAPI.Repositories
         public async Task<IEnumerable<Doctor>> GetAvailableDoctorsToday()
         {
             return await _context.Doctors
+                .Include(d => d.Department)
+                .Include(d => d.WorkingHours)
                 .Where(d => d.IsAvailableToday)
                 .ToListAsync();
         }
@@ -114,6 +160,7 @@ namespace UserAccountAPI.Repositories
             await _context.SaveChangesAsync();
             return doctor;
         }
+
         public async Task<Doctor> AssignDepartment(int doctorId, int departmentId)
         {
             var doctor = await _context.Doctors.FindAsync(doctorId);
@@ -126,7 +173,10 @@ namespace UserAccountAPI.Repositories
 
         public async Task<IEnumerable<Doctor>> FilterDoctors(string specialty, bool? available)
         {
-            var query = _context.Doctors.AsQueryable();
+            var query = _context.Doctors
+                .Include(d => d.Department)
+                .Include(d => d.WorkingHours)
+                .AsQueryable();
 
             if (!string.IsNullOrEmpty(specialty))
                 query = query.Where(d => d.Specialty.Contains(specialty));

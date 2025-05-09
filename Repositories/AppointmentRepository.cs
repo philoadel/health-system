@@ -131,67 +131,30 @@ namespace UserAccountAPI.Repositories
                 var dayOfWeek = date.DayOfWeek;
                 bool isWithinWorkingHours = false;
 
-                if (doctor.WorkingHours != null && doctor.WorkingHours.Any())
+                // Check if doctor has working hours for the specified day
+                var workingHours = doctor.WorkingHours.FirstOrDefault(wh => (int)wh.DayOfWeek == (int)dayOfWeek);
+
+                if (workingHours != null)
                 {
-                    var workingHours = doctor.WorkingHours.FirstOrDefault(wh => wh.DayOfWeek == dayOfWeek);
+                    _logger.LogInformation($"Doctor has working hours on {dayOfWeek}: {workingHours.StartTime} - {workingHours.EndTime}");
 
-                    if (workingHours != null)
+                    // Check if the requested time is within the doctor's working hours
+                    isWithinWorkingHours = startTime >= workingHours.StartTime && endTime <= workingHours.EndTime;
+
+                    if (!isWithinWorkingHours)
                     {
-                        _logger.LogInformation($"Doctor has specific working hours on {dayOfWeek}: {workingHours.StartTime} - {workingHours.EndTime}");
-
-                        isWithinWorkingHours = startTime >= workingHours.StartTime && endTime <= workingHours.EndTime;
-
-                        if (!isWithinWorkingHours)
-                        {
-                            _logger.LogInformation($"Requested time {startTime}-{endTime} is outside working hours {workingHours.StartTime}-{workingHours.EndTime}");
-                            return false;
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogInformation($"No specific working hours found for {dayOfWeek}");
-
-                        if (dayOfWeek == DayOfWeek.Saturday || dayOfWeek == DayOfWeek.Sunday)
-                        {
-                            _logger.LogInformation($"Date {date.ToShortDateString()} is on weekend and no specific hours are set");
-                            return false;
-                        }
-
-                        var defaultStart = new TimeSpan(9, 0, 0); // 9 AM
-                        var defaultEnd = new TimeSpan(17, 0, 0);  // 5 PM
-
-                        isWithinWorkingHours = startTime >= defaultStart && endTime <= defaultEnd;
-
-                        if (!isWithinWorkingHours)
-                        {
-                            _logger.LogInformation($"Requested time {startTime}-{endTime} is outside default hours 9AM-5PM");
-                            return false;
-                        }
+                        _logger.LogInformation($"Requested time {startTime}-{endTime} is outside working hours {workingHours.StartTime}-{workingHours.EndTime}");
+                        return false;
                     }
                 }
                 else
                 {
-                    _logger.LogInformation($"No working hours defined for doctor {doctorId}, using default 9-5 schedule");
-
-                    // Default availability: 9 AM to 5 PM for all days except weekends
-                    if (dayOfWeek == DayOfWeek.Saturday || dayOfWeek == DayOfWeek.Sunday)
-                    {
-                        _logger.LogInformation($"Date {date.ToShortDateString()} is on weekend and no specific hours are set");
-                        return false;
-                    }
-
-                    var defaultStart = new TimeSpan(9, 0, 0); // 9 AM
-                    var defaultEnd = new TimeSpan(17, 0, 0);  // 5 PM
-
-                    isWithinWorkingHours = startTime >= defaultStart && endTime <= defaultEnd;
-
-                    if (!isWithinWorkingHours)
-                    {
-                        _logger.LogInformation($"Requested time {startTime}-{endTime} is outside default hours 9AM-5PM");
-                        return false;
-                    }
+                    // If no working hours found for this day, doctor is not available
+                    _logger.LogInformation($"Doctor is not available on {dayOfWeek} because no working hours are set.");
+                    return false;
                 }
 
+                // Check for overlapping appointments
                 var query = _context.Appointments
                     .Where(a => a.DoctorId == doctorId &&
                                 a.AppointmentDate.Date == date.Date &&
