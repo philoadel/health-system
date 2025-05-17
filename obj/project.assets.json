@@ -5581,11 +5581,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\API\\Auth (4)\\Last version\\AuthAPI\\UserAccountAPI.csproj",
+      "projectUniqueName": "C:\\Last version\\AuthAPI\\UserAccountAPI.csproj",
       "projectName": "UserAccountAPI",
-      "projectPath": "D:\\API\\Auth (4)\\Last version\\AuthAPI\\UserAccountAPI.csproj",
+      "projectPath": "C:\\Last version\\AuthAPI\\UserAccountAPI.csproj",
       "packagesPath": "C:\\Users\\Philo\\.nuget\\packages\\",
-      "outputPath": "D:\\API\\Auth (4)\\Last version\\AuthAPI\\obj\\",
+      "outputPath": "C:\\Last version\\AuthAPI\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Philo\\AppData\\Roaming\\NuGet\\NuGet.Config",

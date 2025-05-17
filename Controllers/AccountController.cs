@@ -113,18 +113,48 @@ namespace UserAccountAPI.Controllers
         public async Task<IActionResult> DeleteUserProfile()
         {
             var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+            if (string.IsNullOrEmpty(userIdString))
             {
-                return Unauthorized();
+                return Unauthorized(new { message = "Invalid or missing user ID." });
             }
 
-            var result = await _userRepository.DeleteUserAsync(userId);
-            if (!result)
+            // Get the user from UserManager
+            var user = await _userManager.FindByIdAsync(userIdString);
+            if (user == null)
             {
                 return NotFound(new { message = "User not found." });
             }
 
-            return Ok(new { message = "User account has been deactivated successfully." });
+            // Delete related Doctor data if user is a Doctor
+            if (_doctorRepository != null && User.IsInRole("Doctor"))
+            {
+                var doctor = (await _doctorRepository.GetAllDoctors())
+                                .FirstOrDefault(d => d.UserId == int.Parse(userIdString));
+                if (doctor != null)
+                {
+                    await _doctorRepository.DeleteDoctor(doctor.Id); // Pass doctor.Id
+                }
+            }
+
+            // Delete related Patient data if user is a Patient
+            if (_patientRepository != null && User.IsInRole("Patient"))
+            {
+                var patient = (await _patientRepository.GetAllPatients())
+                                .FirstOrDefault(p => p.UserId == int.Parse(userIdString));
+                if (patient != null)
+                {
+                    await _patientRepository.DeletePatient(patient.Id); // Pass patient.Id
+                }
+            }
+
+            // Delete the user from Identity
+            var result = await _userManager.DeleteAsync(user);
+            if (!result.Succeeded)
+            {
+                return BadRequest(new { message = "Failed to delete user.", errors = result.Errors });
+            }
+
+            return Ok(new { message = "User account has been deleted successfully." });
         }
 
         [HttpGet("email-verified")]

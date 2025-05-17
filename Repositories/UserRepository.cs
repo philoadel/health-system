@@ -55,16 +55,15 @@ namespace UserAccountAPI.Repositories
 
         public async Task<bool> DeleteUserAsync(int userId)
         {
-            var user = await _userManager.FindByIdAsync(userId.ToString());
+            var user = await _context.Users.FindAsync(userId);
             if (user == null)
             {
                 return false;
             }
 
-            user.IsActive = false;
-            var result = await _userManager.UpdateAsync(user);
-
-            return result.Succeeded;
+            _context.Users.Remove(user);
+            await _context.SaveChangesAsync();
+            return true;
         }
 
         public async Task<List<UserDTO>> GetAllUsersAsync(int page = 1, int pageSize = 10)
